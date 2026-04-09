@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { contacts } from "@/lib/db/schema";
+import { iwgContacts } from "@/lib/db/schema";
 import { getAuth } from "@/lib/auth";
-import { sql, eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 export async function POST(req: NextRequest) {
   const auth = getAuth(req);
@@ -27,19 +27,17 @@ export async function POST(req: NextRequest) {
     results.push({ email, status: "valid", reason: null });
   }
 
-  // Upsert into contacts table
   const valid = results.filter(r => r.status === "valid");
   if (valid.length > 0) {
-    await db.insert(contacts)
+    await db.insert(iwgContacts)
       .values(valid.map(r => ({ userId: auth.userId, email: r.email, status: "valid" })))
-      .onConflictDoUpdate({ target: [contacts.userId, contacts.email], set: { status: "valid" } });
+      .onConflictDoUpdate({ target: [iwgContacts.userId, iwgContacts.email], set: { status: "valid" } });
   }
-
   const invalid = results.filter(r => r.status === "invalid");
   if (invalid.length > 0) {
-    await db.insert(contacts)
+    await db.insert(iwgContacts)
       .values(invalid.map(r => ({ userId: auth.userId, email: r.email, status: "invalid", validationReason: r.reason })))
-      .onConflictDoUpdate({ target: [contacts.userId, contacts.email], set: { status: "invalid", validationReason: sql`excluded.validation_reason` } });
+      .onConflictDoUpdate({ target: [iwgContacts.userId, iwgContacts.email], set: { status: "invalid", validationReason: sql`excluded.validation_reason` } });
   }
 
   return NextResponse.json({ results, total: results.length, valid: valid.length, invalid: invalid.length });

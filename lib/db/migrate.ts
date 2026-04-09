@@ -6,18 +6,23 @@ let done = false;
 export async function autoMigrate() {
   if (done) return;
   try {
+    console.log("IW-Gold: running migration...");
+
+    // All IW-Gold tables are prefixed with "iwg_" to avoid conflicts with Mailo
     await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS users (
+      CREATE TABLE IF NOT EXISTS iwg_users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         email TEXT NOT NULL UNIQUE,
         name TEXT,
         password_hash TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
-      );
+      )
+    `);
 
-      CREATE TABLE IF NOT EXISTS smtp_accounts (
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS iwg_smtp_accounts (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES iwg_users(id) ON DELETE CASCADE,
         label TEXT,
         host TEXT NOT NULL DEFAULT 'smtp.gmail.com',
         port INTEGER NOT NULL DEFAULT 587,
@@ -33,11 +38,13 @@ export async function autoMigrate() {
         last_test_ok BOOLEAN,
         last_error TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
-      );
+      )
+    `);
 
-      CREATE TABLE IF NOT EXISTS contacts (
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS iwg_contacts (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES iwg_users(id) ON DELETE CASCADE,
         email TEXT NOT NULL,
         first_name TEXT,
         last_name TEXT,
@@ -45,11 +52,13 @@ export async function autoMigrate() {
         validation_reason TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         UNIQUE(user_id, email)
-      );
+      )
+    `);
 
-      CREATE TABLE IF NOT EXISTS campaigns (
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS iwg_campaigns (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES iwg_users(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         from_name TEXT NOT NULL,
         subject TEXT NOT NULL,
@@ -68,45 +77,52 @@ export async function autoMigrate() {
         completed_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
-      );
+      )
+    `);
 
-      CREATE TABLE IF NOT EXISTS campaign_recipients (
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS iwg_campaign_recipients (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-        contact_id UUID REFERENCES contacts(id),
+        campaign_id UUID NOT NULL REFERENCES iwg_campaigns(id) ON DELETE CASCADE,
+        contact_id UUID REFERENCES iwg_contacts(id),
         email TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
-        smtp_account_id UUID REFERENCES smtp_accounts(id),
+        smtp_account_id UUID REFERENCES iwg_smtp_accounts(id),
         message_id TEXT,
         sent_at TIMESTAMP,
         error TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         UNIQUE(campaign_id, email)
-      );
+      )
+    `);
 
-      CREATE TABLE IF NOT EXISTS email_events (
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS iwg_email_events (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        campaign_id UUID REFERENCES campaigns(id),
-        recipient_id UUID REFERENCES campaign_recipients(id),
+        campaign_id UUID REFERENCES iwg_campaigns(id),
+        recipient_id UUID REFERENCES iwg_campaign_recipients(id),
         event_type TEXT NOT NULL,
         url TEXT,
         user_agent TEXT,
         ip_address TEXT,
         occurred_at TIMESTAMP DEFAULT NOW() NOT NULL
-      );
+      )
+    `);
 
-      CREATE TABLE IF NOT EXISTS suppression_list (
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS iwg_suppression_list (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID REFERENCES users(id),
+        user_id UUID REFERENCES iwg_users(id),
         email TEXT NOT NULL UNIQUE,
         reason TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
-      );
+      )
     `);
+
     done = true;
     console.log("✓ IW-Gold migration complete");
   } catch (err) {
-    console.error("Migration error:", err);
+    console.error("IW-Gold migration error:", err);
     throw err;
   }
 }

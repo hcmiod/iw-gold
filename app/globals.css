@@ -1,0 +1,7 @@
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3}
+input::placeholder{color:#484f58}
+textarea::placeholder{color:#484f58}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}

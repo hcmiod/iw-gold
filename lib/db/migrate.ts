@@ -8,7 +8,6 @@ export async function autoMigrate() {
   try {
     console.log("IW-Gold: running migration...");
 
-    // All IW-Gold tables are prefixed with "iwg_" to avoid conflicts with Mailo
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS iwg_users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -29,6 +28,7 @@ export async function autoMigrate() {
         secure BOOLEAN NOT NULL DEFAULT false,
         username TEXT NOT NULL,
         password TEXT NOT NULL,
+        reply_to TEXT,
         daily_limit INTEGER NOT NULL DEFAULT 500,
         throttle_seconds INTEGER NOT NULL DEFAULT 5,
         sent_today INTEGER NOT NULL DEFAULT 0,
@@ -39,6 +39,11 @@ export async function autoMigrate() {
         last_error TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       )
+    `);
+
+    // Add reply_to column if it doesn't exist (for existing deployments)
+    await db.execute(sql`
+      ALTER TABLE iwg_smtp_accounts ADD COLUMN IF NOT EXISTS reply_to TEXT
     `);
 
     await db.execute(sql`
@@ -61,6 +66,7 @@ export async function autoMigrate() {
         user_id UUID NOT NULL REFERENCES iwg_users(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         from_name TEXT NOT NULL,
+        reply_to TEXT,
         subject TEXT NOT NULL,
         html_body TEXT NOT NULL,
         text_body TEXT,
@@ -78,6 +84,10 @@ export async function autoMigrate() {
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW() NOT NULL
       )
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE iwg_campaigns ADD COLUMN IF NOT EXISTS reply_to TEXT
     `);
 
     await db.execute(sql`

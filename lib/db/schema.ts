@@ -1,6 +1,4 @@
-import { pgTable, text, timestamp, integer, boolean, uuid, real, index, uniqueIndex } from "drizzle-orm/pg-core";
-
-// All tables prefixed with iwg_ to avoid conflicts when sharing database with Mailo
+import { pgTable, text, timestamp, integer, boolean, uuid, real, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const iwgUsers = pgTable("iwg_users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -19,6 +17,7 @@ export const iwgSmtpAccounts = pgTable("iwg_smtp_accounts", {
   secure: boolean("secure").notNull().default(false),
   username: text("username").notNull(),
   password: text("password").notNull(),
+  replyTo: text("reply_to"),           // reply-to / display sender address
   dailyLimit: integer("daily_limit").notNull().default(500),
   throttleSeconds: integer("throttle_seconds").notNull().default(5),
   sentToday: integer("sent_today").notNull().default(0),
@@ -48,6 +47,7 @@ export const iwgCampaigns = pgTable("iwg_campaigns", {
   userId: uuid("user_id").notNull().references(() => iwgUsers.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   fromName: text("from_name").notNull(),
+  replyTo: text("reply_to"),           // reply-to address for replies
   subject: text("subject").notNull(),
   htmlBody: text("html_body").notNull(),
   textBody: text("text_body"),

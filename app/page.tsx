@@ -41,7 +41,7 @@ export default function App() {
 
   // SMTP
   const [smtpAccounts, setSmtpAccounts] = useState<SmtpAccount[]>([]);
-  const [smtpForm, setSmtpForm] = useState({ username: "", password: "", host: "smtp.gmail.com", port: 587, dailyLimit: 500, throttleSeconds: 5 });
+  const [smtpForm, setSmtpForm] = useState({ username: "", password: "", host: "smtp.gmail.com", port: 587, dailyLimit: 500, throttleSeconds: 5, replyTo: "" });
   const [smtpLoading, setSmtpLoading] = useState(false);
   const [smtpMsg, setSmtpMsg] = useState("");
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -55,6 +55,7 @@ export default function App() {
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [campName, setCampName] = useState("");
+  const [replyTo, setReplyTo] = useState("");
   const [sending, setSending] = useState(false);
   const [sendErr, setSendErr] = useState("");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -106,7 +107,7 @@ export default function App() {
     const d = await r.json(); setSmtpLoading(false);
     if (!r.ok) { setSmtpMsg("Error: " + d.error); return; }
     setSmtpMsg("Account added successfully!");
-    setSmtpForm({ username: "", password: "", host: "smtp.gmail.com", port: 587, dailyLimit: 500, throttleSeconds: 5 });
+    setSmtpForm({ username: "", password: "", host: "smtp.gmail.com", port: 587, dailyLimit: 500, throttleSeconds: 5, replyTo: "" });
     fetchSmtp(token!);
     setTimeout(() => setSmtpMsg(""), 3000);
   }
@@ -139,7 +140,7 @@ export default function App() {
     setSending(true); setSendErr(""); setStep("sending");
     const validEmails = contacts.filter(c => c.status === "valid").map(c => c.email);
     try {
-      const cr = await fetch("/api/campaigns", { method: "POST", headers: { "Content-Type": "application/json", ...H(token!) }, body: JSON.stringify({ name: campName || `Campaign ${new Date().toLocaleDateString()}`, fromName, subject, htmlBody: buildHtml(message) }) });
+      const cr = await fetch("/api/campaigns", { method: "POST", headers: { "Content-Type": "application/json", ...H(token!) }, body: JSON.stringify({ name: campName || `Campaign ${new Date().toLocaleDateString()}`, fromName, replyTo: replyTo || undefined, subject, htmlBody: buildHtml(message) }) });
       const cd = await cr.json();
       if (!cr.ok) throw new Error(cd.error);
       const sr = await fetch(`/api/campaigns/${cd.campaign.id}/send`, { method: "POST", headers: { "Content-Type": "application/json", ...H(token!) }, body: JSON.stringify({ emails: validEmails }) });
@@ -370,13 +371,15 @@ export default function App() {
               <input style={LS.inp} placeholder="e.g. November Promo" value={campName} onChange={e => setCampName(e.target.value)} />
               <label style={LS.lbl}>From Name *</label>
               <input style={LS.inp} placeholder="James from Acme" value={fromName} onChange={e => setFromName(e.target.value)} />
-              <label style={LS.lbl}>Subject Line *</label>
+              <label style={LS.lbl}>Reply-To Address (where replies go)</label>
+            <input style={LS.inp} type="email" placeholder="replies@yourdomain.com (leave blank to use Gmail address)" value={replyTo} onChange={e => setReplyTo(e.target.value)} />
+            <label style={LS.lbl}>Subject Line *</label>
               <input style={LS.inp} placeholder="Exciting news for you!" value={subject} onChange={e => setSubject(e.target.value)} />
               <label style={LS.lbl}>Message *</label>
               <div style={{ fontSize: 11, color: D.muted, marginBottom: 6 }}>Use {"{{unsubscribeUrl}}"} for unsubscribe link. Tracking pixel added automatically.</div>
               <textarea style={{ ...LS.inp, height: 200, resize: "vertical" }} placeholder={"Hello,\n\nYour message here...\n\nBest regards"} value={message} onChange={e => setMessage(e.target.value)} />
               <div style={{ background: "#0d2818", border: `1px solid #1a4731`, borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: D.muted }}>
-                🚀 Ready to send to <strong style={{ color: D.success }}>{validCount} recipients</strong> via your Gmail pool ({smtpAccounts.filter(a => a.isActive).length} active accounts, {fmt(smtpAccounts.filter(a => a.isActive).reduce((s, a) => s + a.dailyLimit, 0))} emails/day capacity)
+                🚀 Ready to send to <strong style={{ color: D.success }}>{validCount} recipients</strong> via your Gmail pool · {smtpAccounts.filter(a => a.isActive).length} accounts × 500/day = {fmt(smtpAccounts.filter(a => a.isActive).reduce((s, a) => s + a.dailyLimit, 0))} total daily capacity
               </div>
               <button style={{ ...LS.btn, background: D.accent, width: "100%" }} onClick={sendCampaign} disabled={sending || !fromName || !subject || !message}>
                 {sending ? "Launching..." : `🚀 Send to ${validCount} Recipients`}
@@ -428,6 +431,8 @@ export default function App() {
               </div>
               <label style={LS.lbl}>Password / App Key</label>
               <input style={LS.inp} type="password" placeholder="••••••••••••••••" value={smtpForm.password} onChange={e => setSmtpForm(p => ({ ...p, password: e.target.value }))} />
+              <label style={LS.lbl}>Reply-To Address (optional — where replies go)</label>
+              <input style={LS.inp} type="email" placeholder="replies@yourdomain.com" value={smtpForm.replyTo} onChange={e => setSmtpForm(p => ({ ...p, replyTo: e.target.value }))} />
               <div style={{ background: "#0d1a2e", border: `1px solid #1a3a5c`, borderRadius: 8, padding: "12px 14px", marginBottom: 12 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: D.accent, marginBottom: 6 }}>ⓘ Gmail Setup Guide</div>
                 <div style={{ fontSize: 11, color: D.muted, lineHeight: 1.6 }}>
@@ -441,6 +446,7 @@ export default function App() {
                 <div>
                   <label style={LS.lbl}>Daily Sending Limit</label>
                   <input style={LS.inp} type="number" value={smtpForm.dailyLimit} onChange={e => setSmtpForm(p => ({ ...p, dailyLimit: +e.target.value }))} />
+                <div style={{ fontSize: 10, color: D.muted, marginTop: -6, marginBottom: 8 }}>Per account. Gmail max is 500/day.</div>
                 </div>
                 <div>
                   <label style={LS.lbl}>Throttle (sec)</label>

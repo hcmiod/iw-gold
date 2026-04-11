@@ -41,7 +41,7 @@ export default function App() {
 
   // SMTP
   const [smtpAccounts, setSmtpAccounts] = useState<SmtpAccount[]>([]);
-  const [smtpForm, setSmtpForm] = useState({ username: "", password: "", host: "smtp.gmail.com", port: 587, dailyLimit: 500, throttleSeconds: 5, replyTo: "" });
+  const [smtpForm, setSmtpForm] = useState({ username: "", password: "", host: "smtp.gmail.com", port: 465, dailyLimit: 500, throttleSeconds: 5, replyTo: "" });
   const [smtpLoading, setSmtpLoading] = useState(false);
   const [smtpMsg, setSmtpMsg] = useState("");
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -103,7 +103,7 @@ export default function App() {
       const d = await r.json();
       if (!r.ok) { setSmtpMsg("Error: " + (d.error ?? "Failed to add account")); return; }
       setSmtpMsg("Account added successfully!");
-      setSmtpForm({ username: "", password: "", host: "smtp.gmail.com", port: 587, dailyLimit: 500, throttleSeconds: 5, replyTo: "" });
+      setSmtpForm({ username: "", password: "", host: "smtp.gmail.com", port: 465, dailyLimit: 500, throttleSeconds: 5, replyTo: "" });
       fetchSmtp(token!);
       setTimeout(() => setSmtpMsg(""), 3000);
     } catch {

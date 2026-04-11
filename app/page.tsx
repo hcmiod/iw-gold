@@ -50,6 +50,7 @@ export default function App() {
   const [step, setStep] = useState<Step>("paste");
   const [rawEmails, setRawEmails] = useState("");
   const [contacts, setContacts] = useState<ContactRow[]>([]);
+  const [breakdown, setBreakdown] = useState<any>(null);
   const [validating, setValidating] = useState(false);
   const [fromName, setFromName] = useState("");
   const [subject, setSubject] = useState("");
@@ -134,6 +135,7 @@ export default function App() {
     const d = await r.json(); setValidating(false);
     if (!r.ok) { setSendErr(d.error); return; }
     setContacts(d.results);
+    setBreakdown(d.breakdown ?? null);
     setStep("validate");
   }
   async function sendCampaign() {
@@ -331,6 +333,16 @@ export default function App() {
                     <div style={{ fontSize: 11, color: D.danger }}>Invalid</div>
                   </div>
                 </div>
+                {breakdown && (
+                  <div style={{ background: "#111820", border: `1px solid ${D.border}`, borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 11 }}>
+                    <div style={{ fontWeight: 600, color: D.text, marginBottom: 8 }}>Validation Breakdown</div>
+                    {breakdown.smtpVerified > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✓ SMTP verified (mailbox confirmed)</span><span style={{ color: D.success }}>{breakdown.smtpVerified}</span></div>}
+                    {breakdown.dnsVerified > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✓ DNS verified (Gmail/Yahoo — unverifiable by design)</span><span style={{ color: D.warning }}>{breakdown.dnsVerified}</span></div>}
+                    {breakdown.mailboxNotFound > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Mailbox does not exist</span><span style={{ color: D.danger }}>{breakdown.mailboxNotFound}</span></div>}
+                    {breakdown.invalidDomain > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Invalid domain</span><span style={{ color: D.danger }}>{breakdown.invalidDomain}</span></div>}
+                    {breakdown.duplicates > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Duplicates removed</span><span style={{ color: D.muted }}>{breakdown.duplicates}</span></div>}
+                  </div>
+                )}
                 <textarea style={{ ...LS.inp, height: 120, fontFamily: "monospace", fontSize: 12 }} value={rawEmails} onChange={e => setRawEmails(e.target.value)} />
                 <button style={{ ...LS.btn, background: D.accent, width: "100%", marginTop: 4 }} onClick={validateEmails} disabled={validating}>
                   {validating ? "Validating..." : "↻ Re-validate"}
@@ -492,8 +504,32 @@ export default function App() {
                       </span>
                     </div>
                   </div>
-                  <div style={{ fontSize: 11, color: D.muted, marginTop: 6 }}>{a.sentToday} sent today</div>
-                  {a.lastError && <div style={{ fontSize: 11, color: D.danger, marginTop: 4 }}>Error: {a.lastError}</div>}
+                  {/* Health bar */}
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: D.muted, marginBottom: 4 }}>
+                      <span>{a.sentToday} / {a.dailyLimit} sent today</span>
+                      <span>{Math.round((a.sentToday / a.dailyLimit) * 100)}% used</span>
+                    </div>
+                    <div style={{ height: 4, background: "#21262d", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: "100%", borderRadius: 2, width: `${Math.min(100, Math.round((a.sentToday / a.dailyLimit) * 100))}%`, background: a.sentToday / a.dailyLimit > 0.9 ? D.danger : a.sentToday / a.dailyLimit > 0.7 ? D.warning : D.success, transition: "width 0.5s" }} />
+                    </div>
+                  </div>
+                  {a.lastError && (
+                    <div style={{ background: "#2d1515", border: `1px solid #4a2020`, borderRadius: 6, padding: "8px 12px", marginTop: 8, fontSize: 11, color: D.danger }}>
+                      ⚠ {a.lastError}
+                    </div>
+                  )}
+                  {/* Spam check link */}
+                  <div style={{ marginTop: 8, fontSize: 11, color: D.muted }}>
+                    Check spam score: {" "}
+                    <a href="https://mail-tester.com" target="_blank" rel="noopener noreferrer" style={{ color: D.accent }}>
+                      mail-tester.com ↗
+                    </a>
+                    {" · "}
+                    <a href={"https://mxtoolbox.com/blacklists.aspx"} target="_blank" rel="noopener noreferrer" style={{ color: D.accent }}>
+                      blacklist check ↗
+                    </a>
+                  </div>
                 </div>
               ))}
             </div>

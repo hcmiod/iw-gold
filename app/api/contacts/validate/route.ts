@@ -50,38 +50,56 @@ const ROLE_PREFIXES = new Set([
   "billing","accounts","enquiries","office",
 ]);
 
-type Result = {
+interface ValidateResult {
   email: string;
   status: "valid" | "invalid";
   reason: string | null;
   warning: string | null;
   verificationLevel: string;
-};
+}
 
-async function validateOne(email: string, seen: Set<string>): Promise<Result> {
+async function validateOne(email: string, seen: Set<string>): Promise<ValidateResult> {
+  // 1. Format check
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
     return { email, status: "invalid", reason: "Invalid email format", warning: null, verificationLevel: "format" };
   }
-  const [local, domain] = email.split("@");
+
+  const atIndex = email.indexOf("@");
+  const local = email.slice(0, atIndex);
+  const domain = email.slice(atIndex + 1);
+
+  // 2. Local part rules
   if (local.length < 1 || local.length > 64 || local.includes("..") || local.startsWith(".") || local.endsWith(".")) {
     return { email, status: "invalid", reason: "Invalid email format", warning: null, verificationLevel: "format" };
   }
+
+  // 3. Duplicate
   if (seen.has(email)) {
     return { email, status: "invalid", reason: "Duplicate — removed", warning: null, verificationLevel: "format" };
   }
+
+  // 4. Typo detection
   if (TYPOS[domain]) {
     return { email, status: "invalid", reason: `Possible typo — did you mean ${local}@${TYPOS[domain]}?`, warning: null, verificationLevel: "format" };
   }
+
+  // 5. Disposable
   if (DISPOSABLE.has(domain)) {
     return { email, status: "invalid", reason: "Disposable email domain", warning: null, verificationLevel: "domain" };
   }
+
+  // 6. DNS MX check
   const hasMx = await domainHasMx(domain);
   if (!hasMx) {
     return { email, status: "invalid", reason: "Domain does not accept email", warning: null, verificationLevel: "dns" };
   }
+
+  // 7. Role address warning
   seen.add(email);
   return {
-    email, status: "valid", reason: null,
+    email,
+    status: "valid",
+    reason: null,
     warning: ROLE_PREFIXES.has(local) ? "Role-based address — may not reach a real person" : null,
     verificationLevel: "dns",
   };
@@ -92,10 +110,14 @@ export async function POST(req: NextRequest) {
     const auth = getAuth(req);
     if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const body = await req.json().catch(() => null);
-    if (!body?.rawEmails?.trim()) return NextResponse.json({ error: "No emails provided" }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const rawEmails: string = body?.rawEmails ?? "";
 
-    const lines: string[] = body.rawEmails
+    if (!rawEmails.trim()) {
+      return NextResponse.json({ error: "No emails provided" }, { status: 400 });
+    }
+
+    const lines: string[] = rawEmails
       .split(/[\n,;]+/)
       .map((e: string) => e.trim().toLowerCase())
       .filter((e: string) => e.length > 0);
@@ -104,38 +126,57 @@ export async function POST(req: NextRequest) {
     if (lines.length > 10000) return NextResponse.json({ error: "Max 10,000 emails per batch" }, { status: 400 });
 
     const seen = new Set<string>();
-    const results: Result[] = [];
+    const results: ValidateResult[] = [];
 
-    // Process in parallel batches of 20 — far faster than sequential
+    // Parallel batches of 20 — much faster than sequential
     const BATCH = 20;
     for (let i = 0; i < lines.length; i += BATCH) {
       const batch = lines.slice(i, i + BATCH);
-      const batchResults = await Promise.all(batch.map(e => validateOne(e, seen)));
+      const batchResults = await Promise.all(batch.map((e: string) => validateOne(e, seen)));
       results.push(...batchResults);
     }
 
     const valid = results.filter(r => r.status === "valid");
     const invalid = results.filter(r => r.status === "invalid");
 
-    // Save in batches of 500
+    // Save to DB in batches of 500
     const DB_BATCH = 500;
     if (valid.length > 0) {
       for (let i = 0; i < valid.length; i += DB_BATCH) {
         await db.insert(iwgContacts)
-          .values(valid.slice(i, i + DB_BATCH).map(r => ({ userId: auth.userId, email: r.email, status: "valid" })))
-          .onConflictDoUpdate({ target: [iwgContacts.userId, iwgContacts.email], set: { status: "valid", validationReason: null } });
+          .values(valid.slice(i, i + DB_BATCH).map(r => ({
+            userId: auth.userId,
+            email: r.email,
+            status: "valid" as const,
+          })))
+          .onConflictDoUpdate({
+            target: [iwgContacts.userId, iwgContacts.email],
+            set: { status: "valid", validationReason: null },
+          });
       }
     }
+
     if (invalid.length > 0) {
       for (let i = 0; i < invalid.length; i += DB_BATCH) {
         await db.insert(iwgContacts)
-          .values(invalid.slice(i, i + DB_BATCH).map(r => ({ userId: auth.userId, email: r.email, status: "invalid", validationReason: r.reason })))
-          .onConflictDoUpdate({ target: [iwgContacts.userId, iwgContacts.email], set: { status: "invalid", validationReason: sql`excluded.validation_reason` } });
+          .values(invalid.slice(i, i + DB_BATCH).map(r => ({
+            userId: auth.userId,
+            email: r.email,
+            status: "invalid" as const,
+            validationReason: r.reason ?? "",
+          })))
+          .onConflictDoUpdate({
+            target: [iwgContacts.userId, iwgContacts.email],
+            set: { status: "invalid", validationReason: sql`excluded.validation_reason` },
+          });
       }
     }
 
     return NextResponse.json({
-      results, total: results.length, valid: valid.length, invalid: invalid.length,
+      results,
+      total: results.length,
+      valid: valid.length,
+      invalid: invalid.length,
       breakdown: {
         dnsVerified: valid.length,
         roleAddresses: valid.filter(r => r.warning).length,
@@ -146,6 +187,7 @@ export async function POST(req: NextRequest) {
         duplicates: results.filter(r => r.reason === "Duplicate — removed").length,
       },
     });
+
   } catch (err) {
     console.error("Validation error:", err);
     return NextResponse.json({ error: "Validation failed — please try again" }, { status: 500 });

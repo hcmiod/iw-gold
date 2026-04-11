@@ -5,14 +5,26 @@ import { eq, sql } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const url = decodeURIComponent(searchParams.get("url") ?? "/");
+  const encodedUrl = searchParams.get("url");
   const recipientId = searchParams.get("r");
   const campaignId = searchParams.get("c");
+
+  const targetUrl = encodedUrl ? decodeURIComponent(encodedUrl) : "/";
+
   if (recipientId && campaignId) {
     try {
-      await db.insert(iwgEmailEvents).values({ campaignId, recipientId, eventType: "clicked", url, userAgent: req.headers.get("user-agent") });
-      await db.update(iwgCampaigns).set({ totalClicked: sql`total_clicked + 1` }).where(eq(iwgCampaigns.id, campaignId));
+      await db.insert(iwgEmailEvents).values({
+        campaignId,
+        recipientId,
+        eventType: "clicked",
+        url: targetUrl,
+        userAgent: req.headers.get("user-agent") ?? undefined,
+      });
+      await db.update(iwgCampaigns)
+        .set({ totalClicked: sql`total_clicked + 1` })
+        .where(eq(iwgCampaigns.id, campaignId));
     } catch {}
   }
-  return NextResponse.redirect(url, { status: 302 });
+
+  return NextResponse.redirect(targetUrl, { status: 302 });
 }

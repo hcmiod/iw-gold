@@ -29,11 +29,11 @@ export default function App() {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [page, setPage] = useState<Page>("dashboard");
-  const [authView, setAuthView] = useState<"login" | "signup">("login");
+
 
   // Auth
   const [email, setEmail] = useState(""); const [pass, setPass] = useState("");
-  const [name, setName] = useState(""); const [authErr, setAuthErr] = useState(""); const [authLoading, setAuthLoading] = useState(false);
+  const [authErr, setAuthErr] = useState(""); const [authLoading, setAuthLoading] = useState(false);
 
   // Dashboard
   const [pool, setPool] = useState<PoolStats | null>(null);
@@ -89,13 +89,7 @@ export default function App() {
     if (!r.ok) { setAuthErr(d.error); return; }
     saveAuth(d);
   }
-  async function signup() {
-    setAuthLoading(true); setAuthErr("");
-    const r = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password: pass }) });
-    const d = await r.json(); setAuthLoading(false);
-    if (!r.ok) { setAuthErr(d.error); return; }
-    saveAuth(d);
-  }
+
   function saveAuth(d: any) {
     localStorage.setItem("iwg_token", d.token); localStorage.setItem("iwg_user", JSON.stringify(d.user));
     setToken(d.token); setUser(d.user); fetchDashboard(d.token);
@@ -188,23 +182,20 @@ export default function App() {
           <div style={{ fontSize: 28, fontWeight: 800, color: D.gold, letterSpacing: "-0.5px" }}>IW-GOLD</div>
           <div style={{ fontSize: 12, color: D.muted, marginTop: 4 }}>Bulk Email Platform</div>
         </div>
-        {authErr && <div style={{ background: "#2d1515", border: `1px solid ${D.danger}`, color: D.danger, padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{authErr}</div>}
-        {authView === "signup" && <>
-          <label style={LS.lbl}>Full Name</label>
-          <input style={LS.inp} placeholder="James Doe" value={name} onChange={e => setName(e.target.value)} />
-        </>}
+        {authErr && (
+          <div style={{ background: "#2d1515", border: `1px solid ${D.danger}`, color: D.danger, padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 16 }}>
+            {authErr}
+          </div>
+        )}
         <label style={LS.lbl}>Email Address</label>
-        <input style={LS.inp} type="email" placeholder="you@gmail.com" value={email} onChange={e => setEmail(e.target.value)} />
+        <input style={LS.inp} type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && login()} />
         <label style={LS.lbl}>Password</label>
-        <input style={LS.inp} type="password" placeholder="••••••••" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === "Enter" && (authView === "login" ? login() : signup())} />
-        <button style={{ ...LS.btn, background: D.accent, marginTop: 4 }} onClick={authView === "login" ? login : signup} disabled={authLoading}>
-          {authLoading ? "Please wait..." : authView === "login" ? "Sign In" : "Create Account"}
+        <input style={LS.inp} type="password" placeholder="••••••••" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === "Enter" && login()} />
+        <button style={{ ...LS.btn, background: D.accent, marginTop: 4 }} onClick={login} disabled={authLoading}>
+          {authLoading ? "Signing in..." : "Sign In"}
         </button>
-        <p style={{ textAlign: "center", fontSize: 13, color: D.muted, marginTop: 16 }}>
-          {authView === "login" ? "No account? " : "Have an account? "}
-          <span style={{ color: D.accent, cursor: "pointer" }} onClick={() => { setAuthView(authView === "login" ? "signup" : "login"); setAuthErr(""); }}>
-            {authView === "login" ? "Create one free" : "Sign in"}
-          </span>
+        <p style={{ textAlign: "center", fontSize: 11, color: D.muted, marginTop: 20 }}>
+          Contact your administrator for access
         </p>
       </div>
     </div>
@@ -229,7 +220,7 @@ export default function App() {
         </div>
         <nav style={{ padding: "12px 10px", flex: 1 }}>
           {navItems.map(n => (
-            <div key={n.id} onClick={() => { setPage(n.id); if (n.id === "smtp") fetchSmtp(token!); if (n.id === "history") fetchCampaigns(token!); if (n.id === "dashboard") fetchDashboard(token!); if (n.id === "contacts") resetSend(); }}
+            <div key={n.id} onClick={() => { setPage(n.id); if (n.id === "smtp") fetchSmtp(token!); if (n.id === "history") fetchCampaigns(token!); if (n.id === "dashboard") fetchDashboard(token!); if (n.id === "contacts") resetSend(); if (n.id === "dashboard") fetchDashboard(token!); }}
               style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: page === n.id ? D.accent : "transparent", color: page === n.id ? "#fff" : D.muted, fontWeight: page === n.id ? 600 : 400, transition: "all 0.15s" }}>
               <span style={{ fontSize: 15 }}>{n.icon}</span>{n.label}
             </div>

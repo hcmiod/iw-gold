@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 type User = { id: string; name: string; email: string };
 type SmtpAccount = { id: string; label: string; username: string; host: string; port: number; dailyLimit: number; throttleSeconds: number; sentToday: number; isActive: boolean; lastTestOk: boolean | null; lastError: string | null };
 type Campaign = { id: string; name: string; status: string; totalRecipients: number; totalSent: number; totalOpened: number; totalClicked: number; subject: string; createdAt: string };
-type ContactRow = { email: string; status: string; reason?: string };
+type ContactRow = { email: string; status: string; reason?: string; warning?: string | null };
 type PoolStats = { active: number; totalCapacity: number; totalSentToday: number; remaining: number };
 
 type Page = "dashboard" | "contacts" | "campaign" | "smtp" | "history";
@@ -336,10 +336,10 @@ export default function App() {
                 {breakdown && (
                   <div style={{ background: "#111820", border: `1px solid ${D.border}`, borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 11 }}>
                     <div style={{ fontWeight: 600, color: D.text, marginBottom: 8 }}>Validation Breakdown</div>
-                    {breakdown.smtpVerified > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✓ SMTP verified (mailbox confirmed)</span><span style={{ color: D.success }}>{breakdown.smtpVerified}</span></div>}
-                    {breakdown.dnsVerified > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✓ DNS verified (Gmail/Yahoo — unverifiable by design)</span><span style={{ color: D.warning }}>{breakdown.dnsVerified}</span></div>}
-                    {breakdown.mailboxNotFound > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Mailbox does not exist</span><span style={{ color: D.danger }}>{breakdown.mailboxNotFound}</span></div>}
-                    {breakdown.invalidDomain > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Invalid domain</span><span style={{ color: D.danger }}>{breakdown.invalidDomain}</span></div>}
+                    {breakdown.dnsVerified > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✓ Valid (format + domain verified)</span><span style={{ color: D.success }}>{breakdown.dnsVerified}</span></div>}
+                    {breakdown.invalidFormat > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Invalid format</span><span style={{ color: D.danger }}>{breakdown.invalidFormat}</span></div>}
+                    {breakdown.invalidDomain > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Domain has no mail server</span><span style={{ color: D.danger }}>{breakdown.invalidDomain}</span></div>}
+                    {breakdown.disposable > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Disposable email domains</span><span style={{ color: D.danger }}>{breakdown.disposable}</span></div>}
                     {breakdown.duplicates > 0 && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: D.muted }}>✗ Duplicates removed</span><span style={{ color: D.muted }}>{breakdown.duplicates}</span></div>}
                   </div>
                 )}
@@ -363,7 +363,9 @@ export default function App() {
                         <span style={{ color: c.status === "valid" ? D.success : D.danger }}>●</span>
                         <span style={{ fontFamily: "monospace", fontSize: 12 }}>{c.email}</span>
                       </div>
-                      <span style={{ fontSize: 11, color: c.status === "valid" ? D.muted : D.danger }}>{c.status === "valid" ? "Pending" : c.reason}</span>
+                      <span style={{ fontSize: 11, color: c.status === "valid" ? (c.warning ? D.warning : D.muted) : D.danger }}>
+                        {c.status === "valid" ? (c.warning ? "⚠ " + c.warning : "Valid") : c.reason}
+                      </span>
                     </div>
                   ))}
                 </div>

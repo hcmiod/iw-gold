@@ -4,121 +4,73 @@ import { iwgContacts } from "@/lib/db/schema";
 import { getAuth } from "@/lib/auth";
 import { sql } from "drizzle-orm";
 import { promises as dns } from "dns";
-import * as net from "net";
 
-// Cache domain results to avoid repeated lookups
-const mxCache = new Map<string, string[]>();
-const smtpCache = new Map<string, "exists" | "notexist" | "unknown">();
+// ─── Domain cache — avoid repeated DNS lookups ────────────────────────────────
+const mxCache = new Map<string, boolean>();
 
-// Providers that block SMTP verification — mark as unverifiable
-const UNVERIFIABLE_PROVIDERS = [
-  "gmail.com", "googlemail.com",
-  "yahoo.com", "yahoo.co.uk", "yahoo.fr", "ymail.com",
-  "hotmail.com", "outlook.com", "live.com", "msn.com",
-  "icloud.com", "me.com", "mac.com",
-  "aol.com", "protonmail.com", "proton.me",
-];
-
-const DISPOSABLE = [
-  "mailinator.com","guerrillamail.com","tempmail.com","throwaway.email",
-  "yopmail.com","trashmail.com","10minutemail.com","sharklasers.com",
-  "maildrop.cc","dispostable.com","fakeinbox.com","spam4.me",
-];
-
-async function getMxRecords(domain: string): Promise<string[]> {
+async function domainHasMx(domain: string): Promise<boolean> {
   if (mxCache.has(domain)) return mxCache.get(domain)!;
   try {
     const records = await dns.resolveMx(domain);
-    const sorted = records
-      .sort((a, b) => a.priority - b.priority)
-      .map(r => r.exchange);
-    mxCache.set(domain, sorted);
-    return sorted;
+    const valid = records.length > 0;
+    mxCache.set(domain, valid);
+    return valid;
   } catch {
-    mxCache.set(domain, []);
-    return [];
+    mxCache.set(domain, false);
+    return false;
   }
 }
 
-/**
- * SMTP handshake verification
- * Connects to the mail server and checks if the mailbox exists
- * without actually sending an email
- */
-async function verifySmtpMailbox(email: string, mxHost: string): Promise<"exists" | "notexist" | "unknown"> {
-  const cacheKey = `${email}:${mxHost}`;
-  if (smtpCache.has(cacheKey)) return smtpCache.get(cacheKey)!;
+// ─── Disposable email domains ─────────────────────────────────────────────────
+const DISPOSABLE = new Set([
+  "mailinator.com","guerrillamail.com","guerrillamailblock.com","guerrillamail.info",
+  "grr.la","sharklasers.com","spam4.me","tempmail.com","throwaway.email",
+  "yopmail.com","trashmail.com","10minutemail.com","maildrop.cc",
+  "dispostable.com","fakeinbox.com","spamgourmet.com","trashmail.at",
+  "trashmail.io","trashmail.me","temp-mail.org","getairmail.com",
+  "mailnull.com","spamex.com","mailexpire.com","discardmail.com",
+  "spammotel.com","mailzilla.com","trashmail.net","wegwerfmail.de",
+  "anonaddy.com","spamgourmet.net","spamgourmet.org","mytrashmail.com",
+  "mt2015.com","mt2016.com","mt2017.com","spamfree24.org",
+  "deadaddress.com","spamgob.com","emailsensei.com","spamthisplease.com",
+]);
 
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      socket.destroy();
-      smtpCache.set(cacheKey, "unknown");
-      resolve("unknown");
-    }, 8000); // 8 second timeout
+// ─── Common typos in popular domains ─────────────────────────────────────────
+const COMMON_TYPOS: Record<string, string> = {
+  "gmial.com": "gmail.com",
+  "gmai.com": "gmail.com",
+  "gamil.com": "gmail.com",
+  "gamail.com": "gmail.com",
+  "gmail.co": "gmail.com",
+  "gmail.cm": "gmail.com",
+  "gmail.ccom": "gmail.com",
+  "gnail.com": "gmail.com",
+  "gmaill.com": "gmail.com",
+  "hotmal.com": "hotmail.com",
+  "hotmial.com": "hotmail.com",
+  "hotmail.co": "hotmail.com",
+  "hotamil.com": "hotmail.com",
+  "hotmaill.com": "hotmail.com",
+  "yahooo.com": "yahoo.com",
+  "yaho.com": "yahoo.com",
+  "yahoo.co": "yahoo.com",
+  "yhaoo.com": "yahoo.com",
+  "outlok.com": "outlook.com",
+  "outloook.com": "outlook.com",
+  "outllook.com": "outlook.com",
+  "iclod.com": "icloud.com",
+  "icoud.com": "icloud.com",
+  "protonmai.com": "protonmail.com",
+  "protonmal.com": "protonmail.com",
+};
 
-    const socket = net.createConnection(25, mxHost);
-    let step = 0;
-    let result: "exists" | "notexist" | "unknown" = "unknown";
-    let buffer = "";
-
-    socket.on("data", (data) => {
-      buffer += data.toString();
-      const lines = buffer.split("\r\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        if (!line) continue;
-        const code = parseInt(line.slice(0, 3));
-
-        if (step === 0 && code === 220) {
-          // Server ready — send EHLO
-          socket.write("EHLO verify.check\r\n");
-          step = 1;
-        } else if (step === 1 && (code === 250 || code === 220)) {
-          // EHLO accepted — send MAIL FROM
-          socket.write("MAIL FROM:<verify@check.com>\r\n");
-          step = 2;
-        } else if (step === 2 && code === 250) {
-          // MAIL FROM accepted — check RCPT TO
-          socket.write(`RCPT TO:<${email}>\r\n`);
-          step = 3;
-        } else if (step === 3) {
-          if (code === 250 || code === 251) {
-            result = "exists";
-          } else if (code === 550 || code === 551 || code === 553 || code === 450 || code === 503) {
-            result = "notexist";
-          } else {
-            result = "unknown";
-          }
-          socket.write("QUIT\r\n");
-          socket.destroy();
-          clearTimeout(timeout);
-          smtpCache.set(cacheKey, result);
-          resolve(result);
-        } else if (code >= 400) {
-          socket.destroy();
-          clearTimeout(timeout);
-          smtpCache.set(cacheKey, "unknown");
-          resolve("unknown");
-        }
-      }
-    });
-
-    socket.on("error", () => {
-      clearTimeout(timeout);
-      smtpCache.set(cacheKey, "unknown");
-      resolve("unknown");
-    });
-
-    socket.on("close", () => {
-      clearTimeout(timeout);
-      if (result === "unknown") {
-        smtpCache.set(cacheKey, "unknown");
-        resolve("unknown");
-      }
-    });
-  });
-}
+// ─── Role-based addresses (often not real people) ────────────────────────────
+const ROLE_PREFIXES = new Set([
+  "admin","administrator","webmaster","hostmaster","postmaster",
+  "noreply","no-reply","donotreply","do-not-reply","mailer-daemon",
+  "abuse","security","support","info","contact","sales","marketing",
+  "newsletter","unsubscribe","help","root","mail","email","bounce",
+]);
 
 export async function POST(req: NextRequest) {
   const auth = getAuth(req);
@@ -138,71 +90,91 @@ export async function POST(req: NextRequest) {
   const seen = new Set<string>();
   const results: {
     email: string;
+    originalEmail: string;
     status: string;
     reason: string | null;
+    warning: string | null;
     verificationLevel: string;
   }[] = [];
 
   for (const email of lines) {
-    // ── Step 1: Format check ───────────────────────────────────────
+
+    // ── 1. Basic format check ────────────────────────────────────────────────
     const formatOk = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
     if (!formatOk) {
-      results.push({ email, status: "invalid", reason: "Invalid format", verificationLevel: "format" });
+      results.push({ email, originalEmail: email, status: "invalid", reason: "Invalid email format", warning: null, verificationLevel: "format" });
       continue;
     }
 
-    // ── Step 2: Duplicate check ────────────────────────────────────
+    const [localPart, domain] = email.split("@");
+
+    // ── 2. Local part checks ─────────────────────────────────────────────────
+    // Too short or too long
+    if (localPart.length < 1 || localPart.length > 64) {
+      results.push({ email, originalEmail: email, status: "invalid", reason: "Invalid email format", warning: null, verificationLevel: "format" });
+      continue;
+    }
+
+    // Consecutive dots or starts/ends with dot
+    if (localPart.includes("..") || localPart.startsWith(".") || localPart.endsWith(".")) {
+      results.push({ email, originalEmail: email, status: "invalid", reason: "Invalid email format", warning: null, verificationLevel: "format" });
+      continue;
+    }
+
+    // ── 3. Duplicate check ───────────────────────────────────────────────────
     if (seen.has(email)) {
-      results.push({ email, status: "invalid", reason: "Duplicate", verificationLevel: "format" });
+      results.push({ email, originalEmail: email, status: "invalid", reason: "Duplicate — removed", warning: null, verificationLevel: "format" });
       continue;
     }
 
-    const domain = email.split("@")[1];
-
-    // ── Step 3: Disposable domain check ───────────────────────────
-    if (DISPOSABLE.includes(domain)) {
-      results.push({ email, status: "invalid", reason: "Disposable email domain", verificationLevel: "domain" });
-      continue;
-    }
-
-    // ── Step 4: DNS MX check ───────────────────────────────────────
-    const mxRecords = await getMxRecords(domain);
-    if (mxRecords.length === 0) {
-      results.push({ email, status: "invalid", reason: "Domain has no mail server", verificationLevel: "dns" });
-      continue;
-    }
-
-    seen.add(email);
-
-    // ── Step 5: SMTP handshake (business emails only) ──────────────
-    if (UNVERIFIABLE_PROVIDERS.includes(domain)) {
-      // Gmail/Yahoo/Outlook block verification — mark as unverifiable but valid format
+    // ── 4. Common domain typo correction ────────────────────────────────────
+    let finalEmail = email;
+    let typoWarning: string | null = null;
+    if (COMMON_TYPOS[domain]) {
+      const corrected = `${localPart}@${COMMON_TYPOS[domain]}`;
+      typoWarning = `Possible typo — did you mean ${corrected}?`;
+      // Mark as invalid — better to flag and let user fix than silently correct
       results.push({
         email,
-        status: "valid",
-        reason: null,
-        verificationLevel: "dns",
-        // @ts-ignore
-        note: "Unverifiable — provider blocks mailbox checks",
+        originalEmail: email,
+        status: "invalid",
+        reason: typoWarning,
+        warning: null,
+        verificationLevel: "format",
       });
       continue;
     }
 
-    // For business/custom domains — do full SMTP verification
-    const mxHost = mxRecords[0];
-    const smtpResult = await verifySmtpMailbox(email, mxHost);
-
-    if (smtpResult === "notexist") {
-      results.push({ email, status: "invalid", reason: "Mailbox does not exist", verificationLevel: "smtp" });
-    } else if (smtpResult === "exists") {
-      results.push({ email, status: "valid", reason: null, verificationLevel: "smtp" });
-    } else {
-      // Unknown — server didn't confirm either way, treat as valid
-      results.push({ email, status: "valid", reason: null, verificationLevel: "dns" });
+    // ── 5. Disposable domain check ───────────────────────────────────────────
+    if (DISPOSABLE.has(domain)) {
+      results.push({ email, originalEmail: email, status: "invalid", reason: "Disposable email domain", warning: null, verificationLevel: "domain" });
+      continue;
     }
+
+    // ── 6. DNS MX check — does domain actually receive email? ────────────────
+    const hasMx = await domainHasMx(domain);
+    if (!hasMx) {
+      results.push({ email, originalEmail: email, status: "invalid", reason: "Domain does not accept email (no MX record)", warning: null, verificationLevel: "dns" });
+      continue;
+    }
+
+    // ── 7. Role-based address warning (valid but risky) ──────────────────────
+    const isRole = ROLE_PREFIXES.has(localPart);
+    const roleWarning = isRole ? "Role-based address — may not reach a real person" : null;
+
+    // ── All checks passed ────────────────────────────────────────────────────
+    seen.add(email);
+    results.push({
+      email: finalEmail,
+      originalEmail: email,
+      status: "valid",
+      reason: null,
+      warning: roleWarning,
+      verificationLevel: "dns",
+    });
   }
 
-  // Save results to database
+  // ── Save to database ─────────────────────────────────────────────────────
   const valid = results.filter(r => r.status === "valid");
   const invalid = results.filter(r => r.status !== "valid");
 
@@ -229,9 +201,8 @@ export async function POST(req: NextRequest) {
       });
   }
 
-  // Count by verification level
-  const smtpVerified = results.filter(r => r.verificationLevel === "smtp" && r.status === "valid").length;
-  const dnsVerified = results.filter(r => r.verificationLevel === "dns" && r.status === "valid").length;
+  const roleAddresses = valid.filter(r => r.warning).length;
+  const typosCaught = results.filter(r => r.reason?.includes("typo") || r.reason?.includes("did you mean")).length;
 
   return NextResponse.json({
     results,
@@ -239,12 +210,13 @@ export async function POST(req: NextRequest) {
     valid: valid.length,
     invalid: invalid.length,
     breakdown: {
-      smtpVerified,      // confirmed mailbox exists
-      dnsVerified,       // domain exists but mailbox unverifiable (Gmail/Yahoo etc.)
-      invalidFormat: results.filter(r => r.reason === "Invalid format").length,
-      invalidDomain: results.filter(r => r.reason === "Domain has no mail server").length,
-      mailboxNotFound: results.filter(r => r.reason === "Mailbox does not exist").length,
-      duplicates: results.filter(r => r.reason === "Duplicate").length,
+      dnsVerified: valid.length,
+      invalidFormat: results.filter(r => r.verificationLevel === "format" && r.reason !== "Duplicate — removed").length,
+      invalidDomain: results.filter(r => r.reason === "Domain does not accept email (no MX record)").length,
+      disposable: results.filter(r => r.reason === "Disposable email domain").length,
+      duplicates: results.filter(r => r.reason === "Duplicate — removed").length,
+      typosCaught,
+      roleAddresses,
     },
   });
 }

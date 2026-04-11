@@ -104,13 +104,19 @@ export default function App() {
 
   async function addSmtp() {
     setSmtpLoading(true); setSmtpMsg("");
-    const r = await fetch("/api/smtp", { method: "POST", headers: { "Content-Type": "application/json", ...H(token!) }, body: JSON.stringify(smtpForm) });
-    const d = await r.json(); setSmtpLoading(false);
-    if (!r.ok) { setSmtpMsg("Error: " + d.error); return; }
-    setSmtpMsg("Account added successfully!");
-    setSmtpForm({ username: "", password: "", host: "smtp.gmail.com", port: 587, dailyLimit: 500, throttleSeconds: 5, replyTo: "" });
-    fetchSmtp(token!);
-    setTimeout(() => setSmtpMsg(""), 3000);
+    try {
+      const r = await fetch("/api/smtp", { method: "POST", headers: { "Content-Type": "application/json", ...H(token!) }, body: JSON.stringify(smtpForm) });
+      const d = await r.json();
+      if (!r.ok) { setSmtpMsg("Error: " + (d.error ?? "Failed to add account")); return; }
+      setSmtpMsg("Account added successfully!");
+      setSmtpForm({ username: "", password: "", host: "smtp.gmail.com", port: 587, dailyLimit: 500, throttleSeconds: 5, replyTo: "" });
+      fetchSmtp(token!);
+      setTimeout(() => setSmtpMsg(""), 3000);
+    } catch {
+      setSmtpMsg("Error: Connection failed — please try again");
+    } finally {
+      setSmtpLoading(false);
+    }
   }
   async function deleteSmtp(id: string) {
     if (!confirm("Remove this SMTP account?")) return;
@@ -119,10 +125,16 @@ export default function App() {
   }
   async function testSmtp(id: string) {
     setTestingId(id);
-    const r = await fetch(`/api/smtp/${id}/test`, { method: "POST", headers: H(token!) });
-    const d = await r.json(); setTestingId(null);
-    alert(d.ok ? "✓ Connection successful!" : "✗ Failed: " + d.error);
-    fetchSmtp(token!);
+    try {
+      const r = await fetch(`/api/smtp/${id}/test`, { method: "POST", headers: H(token!) });
+      const d = await r.json();
+      alert(d.ok ? "✓ Connection successful!" : "✗ Failed: " + (d.error ?? "Unknown error"));
+      fetchSmtp(token!);
+    } catch {
+      alert("✗ Connection error — please try again");
+    } finally {
+      setTestingId(null);
+    }
   }
   async function toggleSmtp(id: string, isActive: boolean) {
     await fetch(`/api/smtp/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...H(token!) }, body: JSON.stringify({ isActive }) });
@@ -131,12 +143,18 @@ export default function App() {
 
   async function validateEmails() {
     setValidating(true); setSendErr("");
-    const r = await fetch("/api/contacts/validate", { method: "POST", headers: { "Content-Type": "application/json", ...H(token!) }, body: JSON.stringify({ rawEmails }) });
-    const d = await r.json(); setValidating(false);
-    if (!r.ok) { setSendErr(d.error); return; }
-    setContacts(d.results);
-    setBreakdown(d.breakdown ?? null);
-    setStep("validate");
+    try {
+      const r = await fetch("/api/contacts/validate", { method: "POST", headers: { "Content-Type": "application/json", ...H(token!) }, body: JSON.stringify({ rawEmails }) });
+      const d = await r.json();
+      if (!r.ok) { setSendErr(d.error ?? "Validation failed"); return; }
+      setContacts(d.results ?? []);
+      setBreakdown(d.breakdown ?? null);
+      setStep("validate");
+    } catch (err) {
+      setSendErr("Connection error — the app may be waking up. Please try again in 30 seconds.");
+    } finally {
+      setValidating(false);
+    }
   }
   async function sendCampaign() {
     setSending(true); setSendErr(""); setStep("sending");
@@ -155,7 +173,7 @@ export default function App() {
   function buildHtml(txt: string) {
     return `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">${txt.replace(/\n/g, "<br/>")}<br/><br/><hr style="border:none;border-top:1px solid #eee;margin:20px 0"/><p style="font-size:12px;color:#999">You are receiving this email because you subscribed.<br/><a href="{{unsubscribeUrl}}" style="color:#999">Unsubscribe</a></p></body></html>`;
   }
-  function resetSend() { setStep("paste"); setRawEmails(""); setContacts([]); setFromName(""); setSubject(""); setMessage(""); setCampName(""); setSendErr(""); }
+  function resetSend() { setStep("paste"); setRawEmails(""); setContacts([]); setBreakdown(null); setFromName(""); setSubject(""); setMessage(""); setCampName(""); setSendErr(""); setReplyTo(""); }
 
   const validCount = contacts.filter(c => c.status === "valid").length;
   const invalidCount = contacts.filter(c => c.status !== "valid").length;

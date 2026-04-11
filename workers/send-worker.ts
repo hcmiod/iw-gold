@@ -3,6 +3,13 @@
  * Run with: npm run worker
  * Processes campaign jobs and sends emails via Gmail SMTP pool
  */
+
+// Load environment variables from .env.local
+import { config } from "dotenv";
+import { resolve } from "path";
+config({ path: resolve(process.cwd(), ".env.local") });
+config({ path: resolve(process.cwd(), ".env") });
+
 import { eq, sql } from "drizzle-orm";
 import { db } from "../lib/db/index.js";
 import {

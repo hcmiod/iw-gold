@@ -19,7 +19,8 @@
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "zod": "^3.23.8",
-    "nanoid": "^5.0.7"
+    "nanoid": "^5.0.7",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/node": "^20",

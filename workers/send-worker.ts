@@ -4,6 +4,7 @@
  * Processes campaign jobs and sends emails via Gmail SMTP pool
  */
 
+<<<<<<< HEAD
 // Load environment variables from .env.local before anything else
 import { readFileSync } from "fs";
 import { resolve } from "path";
@@ -19,6 +20,13 @@ try {
     if (!process.env[key]) process.env[key] = val;
   }
 } catch {}
+=======
+// Load environment variables from .env.local
+import { config } from "dotenv";
+import { resolve } from "path";
+config({ path: resolve(process.cwd(), ".env.local") });
+config({ path: resolve(process.cwd(), ".env") });
+>>>>>>> 2ea43773c2948281136746ef024a249a82470e7f
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "../lib/db/index.js";

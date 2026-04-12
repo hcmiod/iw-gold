@@ -14,12 +14,12 @@ try {
     const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
     if (!process.env[key]) process.env[key] = val;
   }
-  console.log("✓ Environment loaded from .env.local");
+  console.log("Env loaded. DATABASE_URL present:", !!process.env.DATABASE_URL);
 } catch (err) {
   console.error("Could not load .env.local:", err);
 }
 
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and, inArray } from "drizzle-orm";
 import { db } from "../lib/db/index.js";
 import {
   iwgCampaigns,
@@ -33,75 +33,92 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 async function start() {
   console.log("IW-Gold worker starting...");
-
   const boss = await getBoss();
-  console.log("✓ Connected to PostgreSQL queue");
+  console.log("Connected to queue");
 
-  // Process campaign — build recipient list and queue send jobs
+  // Process campaign — insert recipients and queue send jobs
   await boss.work(
     QUEUES.PROCESS_CAMPAIGN,
     { teamSize: 1, teamConcurrency: 1 },
     async (job: any) => {
       const { campaignId, userId, emails } = job.data;
-      console.log(`Processing campaign ${campaignId} with ${emails.length} emails`);
+      console.log(`PROCESS_CAMPAIGN: ${campaignId} — ${emails.length} emails`);
 
       const campaign = await db.query.iwgCampaigns.findFirst({
         where: (c, { eq }) => eq(c.id, campaignId),
       });
 
       if (!campaign) {
-        console.log(`Campaign ${campaignId} not found`);
+        console.log(`Campaign ${campaignId} not found — skipping`);
         return;
       }
 
-      const BATCH = 100;
-      let total = 0;
+      // Check if recipients already exist for this campaign
+      const existing = await db.query.iwgCampaignRecipients.findMany({
+        where: (r, { eq }) => eq(r.campaignId, campaignId),
+      });
 
-      for (let i = 0; i < emails.length; i += BATCH) {
-        const batch = emails.slice(i, i + BATCH);
-        const inserted = await db
-          .insert(iwgCampaignRecipients)
-          .values(batch.map((email: string) => ({
-            campaignId,
-            email: email.toLowerCase().trim(),
-            status: "pending" as const,
-          })))
-          .onConflictDoNothing()
-          .returning({
-            id: iwgCampaignRecipients.id,
-            email: iwgCampaignRecipients.email,
-          });
+      let recipients = existing;
 
-        for (const r of inserted) {
-          await boss.send(QUEUES.SEND_EMAIL, {
-            campaignId,
-            recipientId: r.id,
-            userId,
-            to: r.email,
-            fromName: campaign.fromName,
-            replyTo: campaign.replyTo,
-            subject: campaign.subject,
-            htmlBody: campaign.htmlBody,
-            textBody: campaign.textBody,
-            trackingPixelUrl: `${APP_URL}/api/track/open?r=${r.id}&c=${campaignId}`,
-            unsubscribeUrl: `${APP_URL}/unsubscribe?r=${r.id}&c=${campaignId}`,
-          });
+      if (existing.length === 0) {
+        // Insert recipients fresh
+        console.log(`Inserting ${emails.length} recipients...`);
+        const values = emails.map((email: string) => ({
+          campaignId,
+          email: email.toLowerCase().trim(),
+          status: "pending" as const,
+        }));
+
+        // Insert in batches of 100
+        const inserted: { id: string; email: string }[] = [];
+        const BATCH = 100;
+        for (let i = 0; i < values.length; i += BATCH) {
+          const batch = values.slice(i, i + BATCH);
+          const rows = await db
+            .insert(iwgCampaignRecipients)
+            .values(batch)
+            .onConflictDoNothing()
+            .returning({ id: iwgCampaignRecipients.id, email: iwgCampaignRecipients.email });
+          inserted.push(...rows);
         }
-        total += inserted.length;
+        recipients = inserted as any;
+        console.log(`Inserted ${inserted.length} recipients`);
+      } else {
+        console.log(`${existing.length} recipients already exist for campaign`);
+      }
+
+      // Queue send jobs for pending recipients only
+      const pending = recipients.filter((r: any) => !r.status || r.status === "pending");
+      console.log(`Queuing ${pending.length} send jobs...`);
+
+      for (const r of pending) {
+        await boss.send(QUEUES.SEND_EMAIL, {
+          campaignId,
+          recipientId: r.id,
+          userId,
+          to: r.email,
+          fromName: campaign.fromName,
+          replyTo: campaign.replyTo,
+          subject: campaign.subject,
+          htmlBody: campaign.htmlBody,
+          textBody: campaign.textBody,
+          trackingPixelUrl: `${APP_URL}/api/track/open?r=${r.id}&c=${campaignId}`,
+          unsubscribeUrl: `${APP_URL}/unsubscribe?r=${r.id}&c=${campaignId}`,
+        });
       }
 
       await db.update(iwgCampaigns)
-        .set({ totalRecipients: total, startedAt: new Date() })
+        .set({ totalRecipients: recipients.length, startedAt: new Date() })
         .where(eq(iwgCampaigns.id, campaignId));
 
-      console.log(`Campaign ${campaignId}: ${total} jobs queued`);
+      console.log(`Campaign ${campaignId}: ${pending.length} send jobs queued`);
     }
   );
 
   // Send individual emails
   await boss.work(
     QUEUES.SEND_EMAIL,
-    { teamSize: 5, teamConcurrency: 5 },
+    { teamSize: 3, teamConcurrency: 3 },
     async (job: any) => {
       const {
         campaignId, recipientId, userId, to,
@@ -109,12 +126,15 @@ async function start() {
         trackingPixelUrl, unsubscribeUrl,
       } = job.data;
 
-      // Check suppression list
+      console.log(`SEND_EMAIL: sending to ${to}`);
+
+      // Check suppression
       const suppressed = await db.query.iwgSuppressionList.findFirst({
         where: (s, { eq }) => eq(s.email, to),
       });
 
       if (suppressed) {
+        console.log(`Skipping suppressed: ${to}`);
         await db.update(iwgCampaignRecipients)
           .set({ status: "skipped", error: "suppressed" })
           .where(eq(iwgCampaignRecipients.id, recipientId));
@@ -124,11 +144,13 @@ async function start() {
       // Get SMTP account
       const account = await getAvailableAccount(userId);
       if (!account) {
-        console.error("No SMTP accounts available");
-        throw new Error("No active SMTP accounts — add Gmail accounts or wait for daily reset");
+        console.error("No SMTP accounts available for user:", userId);
+        throw new Error("No active SMTP accounts available");
       }
 
-      // Send email
+      console.log(`Using account: ${account.username} port:${account.port} secure:${account.secure}`);
+
+      // Send
       const result = await sendViaAccount(account, {
         recipientId, campaignId, to, fromName, replyTo,
         subject, htmlBody, textBody, trackingPixelUrl, unsubscribeUrl,
@@ -143,7 +165,7 @@ async function start() {
           .set({ totalSent: sql`total_sent + 1`, updatedAt: new Date() })
           .where(eq(iwgCampaigns.id, campaignId));
 
-        console.log(`Sent to ${to} via ${account.username}`);
+        console.log(`SUCCESS: sent to ${to}`);
       } else {
         await db.update(iwgCampaignRecipients)
           .set({ status: "failed", error: result.error })
@@ -153,11 +175,11 @@ async function start() {
           .set({ totalFailed: sql`total_failed + 1` })
           .where(eq(iwgCampaigns.id, campaignId));
 
-        console.error(`Failed to send to ${to}: ${result.error}`);
+        console.error(`FAILED: ${to} — ${result.error}`);
         throw new Error(result.error);
       }
 
-      // Check if campaign is complete
+      // Check completion
       const stillPending = await db.query.iwgCampaignRecipients.findFirst({
         where: (r, { and, eq }) => and(eq(r.campaignId, campaignId), eq(r.status, "pending")),
       });
@@ -166,35 +188,17 @@ async function start() {
         await db.update(iwgCampaigns)
           .set({ status: "completed", completedAt: new Date() })
           .where(eq(iwgCampaigns.id, campaignId));
-        console.log(`Campaign ${campaignId} completed`);
+        console.log(`COMPLETED: campaign ${campaignId}`);
       }
     }
   );
 
-  console.log("✓ IW-Gold worker ready — listening for jobs...");
+  console.log("Worker ready — listening for jobs...");
 }
 
-process.on("SIGTERM", async () => {
-  const boss = await getBoss();
-  await boss.stop();
-  process.exit(0);
-});
+process.on("SIGTERM", async () => { const b = await getBoss(); await b.stop(); process.exit(0); });
+process.on("SIGINT", async () => { const b = await getBoss(); await b.stop(); process.exit(0); });
+process.on("uncaughtException", (err) => { console.error("Uncaught:", err); });
+process.on("unhandledRejection", (reason) => { console.error("Unhandled:", reason); });
 
-process.on("SIGINT", async () => {
-  const boss = await getBoss();
-  await boss.stop();
-  process.exit(0);
-});
-
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught exception:", err);
-});
-
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled rejection:", reason);
-});
-
-start().catch(err => {
-  console.error("Worker failed to start:", err);
-  process.exit(1);
-});
+start().catch(err => { console.error("Worker failed:", err); process.exit(1); });

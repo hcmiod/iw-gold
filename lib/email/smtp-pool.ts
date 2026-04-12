@@ -91,7 +91,7 @@ export async function sendViaAccount(
         `<img src="${job.trackingPixelUrl}" width="1" height="1" alt="" style="display:none"/></body>`
       );
 
-    const info = await transporter.sendMail({
+    const info = await sendWithTimeout({
       from: fromField,
       replyTo: replyToAddress,
       to: job.to,

@@ -78,20 +78,18 @@ export async function sendViaAccount(
     // Reply-To: campaign reply-to > account reply-to > gmail address
     const replyToAddress = job.replyTo || account.replyTo || account.username;
 
-    // Make reply-to visible as the sender display address
-    // Format: "Name <reply@domain.com>" <actual-gmail@gmail.com>
-    // This shows the reply-to address visibly in email clients
-    const fromField = replyToAddress !== account.username
-      ? `"${job.fromName} <${replyToAddress}>" <${account.username}>`
-      : `"${job.fromName}" <${account.username}>`;
+
+
+
+    const fromField = `"${job.fromName}" <${account.username}>`;
 
     const html = job.htmlBody
-      .replace(/\{\{unsubscribeUrl\}\}/g, job.unsubscribeUrl)
+      .replace(/\{\{unsubscribeUrl\}\}/g, "")
       .replace("</body>",
         `<img src="${job.trackingPixelUrl}" width="1" height="1" alt="" style="display:none"/></body>`
       );
 
-    const info = await sendWithTimeout({
+    const info = await transporter.sendMail({
       from: fromField,
       replyTo: replyToAddress,
       to: job.to,
@@ -99,7 +97,7 @@ export async function sendViaAccount(
       html,
       text: job.textBody ?? job.htmlBody.replace(/<[^>]+>/g, "").trim(),
       headers: {
-        "List-Unsubscribe": `<${job.unsubscribeUrl}>`,
+        "List-Unsubscribe": `<${""}>`,
         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
       },
     });

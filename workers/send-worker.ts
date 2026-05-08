@@ -29,12 +29,37 @@ import { getAvailableAccount, sendViaAccount } from "../lib/email/smtp-pool.js";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
+// ─── Detect permanent bounce errors ──────────────────────────────────────────
+function isPermanentBounce(error: string): boolean {
+  const permanentErrors = [
+    "user unknown",
+    "does not exist",
+    "mailbox unavailable",
+    "mailbox not found",
+    "invalid recipient",
+    "address rejected",
+    "no such user",
+    "recipient rejected",
+    "bad destination mailbox",
+    "550 5.1.1",
+    "550 5.1.2",
+    "550 5.1.3",
+    "550 5.4.1",
+    "user not found",
+    "unknown user",
+    "invalid address",
+    "account does not exist",
+    "recipient address rejected",
+  ];
+  const lower = error.toLowerCase();
+  return permanentErrors.some(e => lower.includes(e));
+}
+
 async function start() {
   console.log("Worker starting...");
 
-  // Test DB connection first
   try {
-    const test = await db.query.iwgCampaigns.findMany({ limit: 1 });
+    await db.query.iwgCampaigns.findMany({ limit: 1 });
     console.log("DB connection OK");
   } catch (err) {
     console.error("DB connection FAILED:", err);
@@ -44,7 +69,7 @@ async function start() {
   const boss = await getBoss();
   console.log("Queue connected");
 
-  // ── PROCESS_CAMPAIGN: insert recipients and queue send jobs ───────────────
+  // ── PROCESS_CAMPAIGN ─────────────────────────────────────────────────────
   await boss.work(QUEUES.PROCESS_CAMPAIGN, { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
     const { campaignId, userId, emails } = job.data;
     console.log(`PROCESS: campaign=${campaignId} emails=${emails.length}`);
@@ -55,18 +80,30 @@ async function start() {
       });
 
       if (!campaign) {
-        console.error(`Campaign ${campaignId} not found in DB`);
+        console.error(`Campaign ${campaignId} not found`);
         return;
       }
 
       console.log(`Campaign found: "${campaign.subject}"`);
 
-      // Insert recipients one by one to catch errors
       let inserted = 0;
+      let skippedSuppressed = 0;
       const recipientIds: { id: string; email: string }[] = [];
 
       for (const rawEmail of emails) {
         const email = rawEmail.toLowerCase().trim();
+
+        // Check suppression list before inserting
+        const suppressed = await db.query.iwgSuppressionList.findFirst({
+          where: (s, { eq }) => eq(s.email, email),
+        });
+
+        if (suppressed) {
+          skippedSuppressed++;
+          console.log(`Skipped suppressed: ${email}`);
+          continue;
+        }
+
         try {
           const rows = await db.insert(iwgCampaignRecipients)
             .values({ campaignId, email, status: "pending" })
@@ -76,15 +113,12 @@ async function start() {
           if (rows.length > 0) {
             recipientIds.push(rows[0]);
             inserted++;
-            console.log(`Inserted recipient: ${email}`);
           } else {
-            // Already exists — get existing
             const existing = await db.query.iwgCampaignRecipients.findFirst({
               where: (r, { and, eq }) => and(eq(r.campaignId, campaignId), eq(r.email, email)),
             });
-            if (existing) {
+            if (existing && existing.status === "pending") {
               recipientIds.push({ id: existing.id, email: existing.email });
-              console.log(`Recipient already exists: ${email} status=${existing.status}`);
             }
           }
         } catch (err) {
@@ -92,9 +126,8 @@ async function start() {
         }
       }
 
-      console.log(`Total recipients: ${recipientIds.length} (${inserted} new)`);
+      console.log(`Total: ${recipientIds.length} queued, ${skippedSuppressed} suppressed`);
 
-      // Queue send jobs for pending recipients
       for (const r of recipientIds) {
         await boss.send(QUEUES.SEND_EMAIL, {
           campaignId, recipientId: r.id, userId, to: r.email,
@@ -112,25 +145,28 @@ async function start() {
 
       console.log(`PROCESS done: ${recipientIds.length} jobs queued`);
     } catch (err) {
-      console.error(`PROCESS_CAMPAIGN error for ${campaignId}:`, err);
+      console.error(`PROCESS_CAMPAIGN error:`, err);
       throw err;
     }
   });
 
-  // ── SEND_EMAIL: send one email ────────────────────────────────────────────
+  // ── SEND_EMAIL ────────────────────────────────────────────────────────────
   await boss.work(QUEUES.SEND_EMAIL, { teamSize: 3, teamConcurrency: 3 }, async (job: any) => {
     const { campaignId, recipientId, userId, to, fromName, replyTo, subject, htmlBody, textBody, trackingPixelUrl, unsubscribeUrl } = job.data;
     console.log(`SEND: to=${to} campaign=${campaignId}`);
 
     try {
+      // Check suppression list
       const suppressed = await db.query.iwgSuppressionList.findFirst({
         where: (s, { eq }) => eq(s.email, to),
       });
 
       if (suppressed) {
         console.log(`Suppressed: ${to}`);
-        await db.update(iwgCampaignRecipients).set({ status: "skipped", error: "suppressed" }).where(eq(iwgCampaignRecipients.id, recipientId));
-        return;
+        await db.update(iwgCampaignRecipients)
+          .set({ status: "skipped", error: "suppressed" })
+          .where(eq(iwgCampaignRecipients.id, recipientId));
+        return; // No retry
       }
 
       const account = await getAvailableAccount(userId);
@@ -155,14 +191,39 @@ async function start() {
           .set({ totalSent: sql`total_sent + 1`, updatedAt: new Date() })
           .where(eq(iwgCampaigns.id, campaignId));
       } else {
-        console.error(`SEND FAILED: ${to} — ${result.error}`);
-        await db.update(iwgCampaignRecipients)
-          .set({ status: "failed", error: result.error })
-          .where(eq(iwgCampaignRecipients.id, recipientId));
-        await db.update(iwgCampaigns)
-          .set({ totalFailed: sql`total_failed + 1` })
-          .where(eq(iwgCampaigns.id, campaignId));
-        throw new Error(result.error);
+        const error = result.error ?? "Unknown error";
+        console.error(`SEND FAILED: ${to} — ${error}`);
+
+        if (isPermanentBounce(error)) {
+          // Permanent bounce — suppress and never retry
+          console.log(`PERMANENT BOUNCE — suppressing: ${to}`);
+          try {
+            await db.insert(iwgSuppressionList)
+              .values({ email: to, reason: `bounce: ${error.slice(0, 200)}` })
+              .onConflictDoNothing();
+          } catch {}
+
+          await db.update(iwgCampaignRecipients)
+            .set({ status: "failed", error: `bounced: ${error.slice(0, 200)}` })
+            .where(eq(iwgCampaignRecipients.id, recipientId));
+          await db.update(iwgCampaigns)
+            .set({
+              totalFailed: sql`total_failed + 1`,
+              totalBounced: sql`total_bounced + 1`,
+              updatedAt: new Date()
+            })
+            .where(eq(iwgCampaigns.id, campaignId));
+          // Do NOT throw — no retry for permanent bounces
+        } else {
+          // Temporary failure — mark failed but allow pg-boss retry
+          await db.update(iwgCampaignRecipients)
+            .set({ status: "failed", error: error.slice(0, 200) })
+            .where(eq(iwgCampaignRecipients.id, recipientId));
+          await db.update(iwgCampaigns)
+            .set({ totalFailed: sql`total_failed + 1`, updatedAt: new Date() })
+            .where(eq(iwgCampaigns.id, campaignId));
+          throw new Error(error); // Retry for temporary errors
+        }
       }
 
       // Mark campaign complete if no pending left
@@ -175,7 +236,7 @@ async function start() {
           .where(eq(iwgCampaigns.id, campaignId));
         console.log(`CAMPAIGN COMPLETE: ${campaignId}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(`SEND_EMAIL error for ${to}:`, err);
       throw err;
     }

@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 
 type User = { id: string; name: string; email: string };
 type SmtpAccount = { id: string; label: string; username: string; host: string; port: number; dailyLimit: number; throttleSeconds: number; sentToday: number; isActive: boolean; lastTestOk: boolean | null; lastError: string | null };
-type Campaign = { id: string; name: string; status: string; totalRecipients: number; totalSent: number; totalOpened: number; totalClicked: number; subject: string; createdAt: string };
+type Campaign = { id: string; name: string; status: string; totalRecipients: number; totalSent: number; totalFailed: number; totalBounced: number; totalOpened: number; totalClicked: number; subject: string; createdAt: string };
 type ContactRow = { email: string; status: string; reason?: string; warning?: string | null };
 type PoolStats = { active: number; totalCapacity: number; totalSentToday: number; remaining: number };
 
@@ -554,8 +554,8 @@ export default function App() {
             <button style={{ ...LS.btn, background: D.accent, width: "auto", padding: "8px 18px" }} onClick={() => { setPage("contacts"); resetSend(); }}>+ New Campaign</button>
           </div>
           <div style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 90px 80px 70px 70px 70px 80px", padding: "10px 18px", borderBottom: `1px solid ${D.border}`, background: "#111820" }}>
-              {["Campaign", "Status", "Recipients", "Sent", "Opens", "Clicks", "Date"].map(h => (
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 90px 80px 70px 70px 70px 70px 70px 80px", padding: "10px 18px", borderBottom: `1px solid ${D.border}`, background: "#111820" }}>
+              {["Campaign", "Status", "Recipients", "Sent", "Bounced", "Failed", "Opens", "Clicks", "Date"].map(h => (
                 <div key={h} style={{ fontSize: 10, fontWeight: 600, color: D.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</div>
               ))}
             </div>
@@ -568,7 +568,7 @@ export default function App() {
               const sc = { draft: { bg: "#1c2128", color: D.muted }, sending: { bg: "#0d1a2e", color: D.accent }, completed: { bg: "#0d2818", color: D.success }, paused: { bg: "#2d2200", color: D.warning } };
               const s = sc[c.status as keyof typeof sc] ?? sc.draft;
               return (
-                <div key={c.id} style={{ display: "grid", gridTemplateColumns: "2fr 90px 80px 70px 70px 70px 80px", padding: "13px 18px", borderBottom: i < campaigns.length - 1 ? `1px solid ${D.border}` : "none", alignItems: "center" }}>
+                <div key={c.id} style={{ display: "grid", gridTemplateColumns: "2fr 90px 80px 70px 70px 70px 70px 70px 80px", padding: "13px 18px", borderBottom: i < campaigns.length - 1 ? `1px solid ${D.border}` : "none", alignItems: "center" }}>
                   <div>
                     <div style={{ fontWeight: 500 }}>{c.name}</div>
                     <div style={{ fontSize: 11, color: D.muted, marginTop: 2 }}>{c.subject}</div>
@@ -576,6 +576,8 @@ export default function App() {
                   <div><span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 20, background: s.bg, color: s.color }}>{c.status}</span></div>
                   <div>{fmt(c.totalRecipients)}</div>
                   <div>{fmt(c.totalSent)}</div>
+                  <div style={{ color: "#e05" }}>{fmt(c.totalBounced ?? 0)}</div>
+                  <div style={{ color: D.warning }}>{fmt(c.totalFailed ?? 0)}</div>
                   <div>{pct(c.totalOpened, c.totalSent)}</div>
                   <div>{pct(c.totalClicked, c.totalSent)}</div>
                   <div style={{ fontSize: 11, color: D.muted }}>{new Date(c.createdAt).toLocaleDateString()}</div>

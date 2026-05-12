@@ -34,7 +34,7 @@ export default function AdminPage() {
   const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
-    const t = localStorage.getItem("iwg_admin_token");
+    const t = localStorage.getItem("zn26_admin_token");
     if (t) { setToken(t); fetchUsers(t); }
   }, []);
 
@@ -55,7 +55,7 @@ export default function AdminPage() {
       });
       const d = await r.json();
       if (!r.ok) { setLoginErr(d.error ?? "Invalid credentials"); return; }
-      localStorage.setItem("iwg_admin_token", d.token);
+      localStorage.setItem("zn26_admin_token", d.token);
       setToken(d.token);
       fetchUsers(d.token);
     } catch {
@@ -69,7 +69,7 @@ export default function AdminPage() {
     setLoading(true);
     try {
       const r = await fetch("/api/admin/users", { headers: H(t) });
-      if (r.status === 401) { setToken(null); localStorage.removeItem("iwg_admin_token"); return; }
+      if (r.status === 401) { setToken(null); localStorage.removeItem("zn26_admin_token"); return; }
       const d = await r.json();
       setUsers(d.users ?? []);
     } catch {
@@ -137,7 +137,7 @@ export default function AdminPage() {
   }
 
   function logout() {
-    localStorage.removeItem("iwg_admin_token");
+    localStorage.removeItem("zn26_admin_token");
     setToken(null); setUsers([]);
   }
 
@@ -146,8 +146,8 @@ export default function AdminPage() {
     <div style={{ minHeight: "100vh", background: D.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui,sans-serif" }}>
       <div style={{ width: 380, background: D.card, border: `1px solid ${D.border}`, borderRadius: 12, padding: "40px 36px" }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: D.gold }}>IW-GOLD</div>
-          <div style={{ fontSize: 12, color: D.muted, marginTop: 4 }}>Admin Panel</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: D.gold }}>ZION N26</div>
+          <div style={{ fontSize: 12, color: D.muted, marginTop: 4 }}>Admin</div>
         </div>
         {loginErr && (
           <div style={{ background: "#2d1515", border: `1px solid ${D.danger}`, color: D.danger, padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 16 }}>
@@ -175,8 +175,8 @@ export default function AdminPage() {
       {/* Header */}
       <div style={{ background: D.sidebar, borderBottom: `1px solid ${D.border}`, padding: "0 28px", height: 52, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 18, fontWeight: 800, color: D.gold }}>IW-GOLD</span>
-          <span style={{ fontSize: 12, color: D.muted, background: D.card, padding: "2px 8px", borderRadius: 4, border: `1px solid ${D.border}` }}>Admin Panel</span>
+          <span style={{ fontSize: 18, fontWeight: 800, color: D.gold }}>ZION N26</span>
+          <span style={{ fontSize: 12, color: D.muted, background: D.card, padding: "2px 8px", borderRadius: 4, border: `1px solid ${D.border}` }}>Admin</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <a href="/" style={{ fontSize: 12, color: D.accent, textDecoration: "none" }}>← Go to App</a>

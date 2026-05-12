@@ -62,8 +62,8 @@ export default function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 
   useEffect(() => {
-    const t = localStorage.getItem("iwg_token");
-    const u = localStorage.getItem("iwg_user");
+    const t = localStorage.getItem("zn26_token");
+    const u = localStorage.getItem("zn26_user");
     if (t && u) { setToken(t); setUser(JSON.parse(u)); fetchDashboard(t); }
   }, []);
 
@@ -91,10 +91,10 @@ export default function App() {
   }
 
   function saveAuth(d: any) {
-    localStorage.setItem("iwg_token", d.token); localStorage.setItem("iwg_user", JSON.stringify(d.user));
+    localStorage.setItem("zn26_token", d.token); localStorage.setItem("zn26_user", JSON.stringify(d.user));
     setToken(d.token); setUser(d.user); fetchDashboard(d.token);
   }
-  function logout() { localStorage.removeItem('iwg_token'); localStorage.removeItem('iwg_user'); setToken(null); setUser(null); }
+  function logout() { localStorage.removeItem('zn26_token'); localStorage.removeItem('zn26_user'); setToken(null); setUser(null); }
 
   async function addSmtp() {
     setSmtpLoading(true); setSmtpMsg("");
@@ -179,7 +179,7 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: D.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui,sans-serif" }}>
       <div style={{ width: 400, background: D.card, border: `1px solid ${D.border}`, borderRadius: 12, padding: "40px 36px" }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 28, fontWeight: 800, color: D.gold, letterSpacing: "-0.5px" }}>IW-GOLD</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: D.gold, letterSpacing: "-0.5px" }}>ZION N26</div>
           <div style={{ fontSize: 12, color: D.muted, marginTop: 4 }}>Bulk Email Platform</div>
         </div>
         {authErr && (
@@ -215,8 +215,8 @@ export default function App() {
       {/* Sidebar */}
       <aside style={{ width: 220, background: D.sidebar, borderRight: `1px solid ${D.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "20px 20px 16px", borderBottom: `1px solid ${D.border}` }}>
-          <div style={{ fontSize: 20, fontWeight: 800, color: D.gold, letterSpacing: "-0.5px" }}>IW-GOLD</div>
-          <div style={{ fontSize: 10, color: D.muted, marginTop: 2 }}>v1.0.0 PRO</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: D.gold, letterSpacing: "-0.5px" }}>ZION N26</div>
+          <div style={{ fontSize: 10, color: D.muted, marginTop: 2 }}>v1.0.0</div>
         </div>
         <nav style={{ padding: "12px 10px", flex: 1 }}>
           {navItems.map(n => (
@@ -275,7 +275,7 @@ export default function App() {
                 {[
                   { label: "Total Sent", value: fmt(dashCampaigns.reduce((a, c) => a + c.totalSent, 0)), color: D.accent },
                   { label: "Total Opened", value: fmt(dashCampaigns.reduce((a, c) => a + c.totalOpened, 0)), color: D.success },
-                  { label: "Total Clicked", value: fmt(dashCampaigns.reduce((a, c) => a + c.totalClicked, 0)), color: D.gold },
+                  { label: "Total Delivered", value: fmt(dashCampaigns.reduce((a, c) => a + c.totalSent, 0)), color: D.gold },
                   { label: "Campaigns Run", value: dashCampaigns.length, color: D.text },
                 ].map((s, i) => (
                   <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -555,7 +555,7 @@ export default function App() {
           </div>
           <div style={{ background: D.card, border: `1px solid ${D.border}`, borderRadius: 10, overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: "2fr 90px 80px 70px 70px 70px 70px 70px 80px", padding: "10px 18px", borderBottom: `1px solid ${D.border}`, background: "#111820" }}>
-              {["Campaign", "Status", "Recipients", "Sent", "Bounced", "Failed", "Opens", "Clicks", "Date"].map(h => (
+              {["Campaign", "Status", "Recipients", "Sent", "Bounced", "Failed", "Opens", "Delivered", "Date"].map(h => (
                 <div key={h} style={{ fontSize: 10, fontWeight: 600, color: D.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</div>
               ))}
             </div>
@@ -579,7 +579,7 @@ export default function App() {
                   <div style={{ color: "#e05" }}>{fmt(c.totalBounced ?? 0)}</div>
                   <div style={{ color: D.warning }}>{fmt(c.totalFailed ?? 0)}</div>
                   <div>{pct(c.totalOpened, c.totalSent)}</div>
-                  <div>{pct(c.totalClicked, c.totalSent)}</div>
+                  <div>{fmt(c.totalSent)}</div>
                   <div style={{ fontSize: 11, color: D.muted }}>{new Date(c.createdAt).toLocaleDateString()}</div>
                 </div>
               );
